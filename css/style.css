@@ -231,6 +231,20 @@ input:focus, select:focus, textarea:focus {
 .tag:hover { background: var(--accent-mid); }
 .tag-static { cursor: default !important; }
 
+/* 열 문자 뱃지 (A열, B열 ...) */
+.col-chip { display: inline-flex; align-items: center; gap: 4px; }
+.col-letter {
+  display: inline-block;
+  background: var(--accent);
+  color: #EEEDFE;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  letter-spacing: 0.02em;
+}
+
 /* ── Upload zone ── */
 .upload-zone {
   border: 1.5px dashed var(--border-2);

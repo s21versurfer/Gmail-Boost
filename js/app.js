@@ -187,20 +187,35 @@ function parseCSV(txt) {
   });
 }
 
+/* 숫자 인덱스 → 엑셀 열 문자 (0→A, 25→Z, 26→AA ...) */
+function colLetter(i) {
+  let s = '';
+  i += 1;
+  while (i > 0) {
+    const r = (i - 1) % 26;
+    s = String.fromCharCode(65 + r) + s;
+    i = Math.floor((i - 1) / 26);
+  }
+  return s;
+}
+
 function showCols() {
   const area = document.getElementById('col-area');
   area.classList.remove('hidden');
   document.getElementById('col-tags').innerHTML =
-    cols.map(c => `<span class="tag tag-static">${c}</span>`).join('');
-  document.getElementById('data-stat').textContent = `${rows.length}개 행 로드됨`;
+    cols.map((c, i) => `<span class="tag tag-static col-chip">
+      <span class="col-letter">${colLetter(i)}</span>${c}
+    </span>`).join('');
+  document.getElementById('data-stat').textContent =
+    `${cols.length}개 열 · ${rows.length}개 행 로드됨`;
 }
 
 function updateEmailSel() {
   const s = document.getElementById('email-col');
-  s.innerHTML = '<option>— 선택 —</option>' + cols.map(c => `<option>${c}</option>`).join('');
+  s.innerHTML = '<option value="">— 선택 —</option>' +
+    cols.map((c, i) => `<option value="${i}">${colLetter(i)}열 — ${c}</option>`).join('');
 }
 
-/* ── Mapping ── */
 function updateMapping() {
   const vars = getVars();
   const area = document.getElementById('mapping-area');
@@ -209,8 +224,11 @@ function updateMapping() {
     return;
   }
   area.innerHTML = vars.map(v => {
+    // 열 문자 or 헤더명 자동 매칭
     const ai = cols.findIndex(c => c.trim().toLowerCase() === v.trim().toLowerCase());
-    const opts = cols.map((c, i) => `<option value="${i}"${i === ai ? ' selected' : ''}>${c}</option>`).join('');
+    const opts = cols.map((c, i) =>
+      `<option value="${i}"${i === ai ? ' selected' : ''}>${colLetter(i)}열 — ${c}</option>`
+    ).join('');
     return `<div class="mapping-row">
       <span class="m-tag">{{${v}}}</span>
       <span class="m-arrow">→</span>
@@ -239,8 +257,7 @@ function applyTmpl(tmpl, vm, rowData) {
 function genPreviews() {
   const subj = document.getElementById('subj').value;
   const bodyHTML = editor.innerHTML;
-  const emailColName = document.getElementById('email-col').value;
-  const emailColIdx = cols.indexOf(emailColName);
+  const emailColIdx = parseInt(document.getElementById('email-col').value);
   const rs = parseInt(document.getElementById('row-s').value) - 2;
   const re = parseInt(document.getElementById('row-e').value);
 
