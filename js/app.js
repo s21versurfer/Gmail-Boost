@@ -33,6 +33,17 @@ const editor = document.getElementById('body-editor');
 editor.addEventListener('blur', saveRange);
 editor.addEventListener('keyup', () => { updateTags(); saveRange(); });
 editor.addEventListener('mouseup', saveRange);
+editor.addEventListener('input', updateTags);
+
+/* ── 에디터 텍스트 추출 (HTML 태그 제거, 엔티티 디코딩) ── */
+function editorPlainText() {
+  // innerHTML에서 <br>→\n 변환 후 태그 제거
+  return editor.innerHTML
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ');
+}
 
 /* ── Toolbar commands ── */
 function fmt(cmd) { editor.focus(); document.execCommand(cmd, false, null); updateTags(); }
@@ -74,10 +85,14 @@ function insertTable() {
   document.execCommand('insertHTML', false, html);
 }
 
-/* ── Variable detection ── */
+/* ── Variable detection ── 제목 + 에디터 텍스트에서 {{변수}} 감지 */
 function getVars() {
-  const txt = (document.getElementById('subj').value || '') + (editor.innerHTML || '');
-  const m = [...txt.matchAll(/\{\{([^}]+)\}\}/g)];
+  const subjTxt = document.getElementById('subj').value || '';
+  // innerHTML 전체(서식 포함)에서 {{...}} 추출 — 엔티티 디코딩 후 파싱
+  const raw = editor.innerHTML
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+  const combined = subjTxt + raw;
+  const m = [...combined.matchAll(/\{\{([^}]+)\}\}/g)];
   return [...new Set(m.map(x => x[1].trim()))];
 }
 
@@ -85,15 +100,15 @@ function updateTags() {
   const v = getVars();
   const row = document.getElementById('tag-row');
   row.innerHTML = v.length
-    ? v.map(x => `<button class="tag" onclick="insertVar('${x}')">{{${x}}}</button>`).join('')
+    ? v.map(x => `<button class="tag" onclick="insertVar('${CSS.escape(x)}','${x.replace(/'/g,"\\'")}')">{{${x}}}</button>`).join('')
     : '<span class="empty-note">변수 없음</span>';
 }
 
-function insertVar(v) {
+/* 에디터에 {{변수}} 텍스트 그대로 삽입 (span 래퍼 없음) */
+function insertVar(escaped, raw) {
   restoreRange();
-  document.execCommand('insertHTML', false,
-    `<span style="background:#EEEDFE;color:#3C3489;border-radius:3px;padding:0 3px;font-family:monospace;font-size:0.93em">{{${v}}}</span>`
-  );
+  // 순수 텍스트로 삽입 — 하이라이트는 CSS ::after 트릭 대신 그냥 텍스트로
+  document.execCommand('insertText', false, `{{${raw}}}`);
   saveRange();
   updateTags();
 }
@@ -112,7 +127,7 @@ function renderImgGrid() {
   const keys = Object.keys(imgs);
   if (!keys.length) { g.innerHTML = '<p class="empty-note">이미지 없음</p>'; return; }
   g.innerHTML = keys.map(k => `
-    <div class="img-thumb" onclick="insertImg('${k}')" role="button" tabindex="0" aria-label="${k} 삽입">
+    <div class="img-thumb" onclick="insertImg('${k.replace(/'/g,"\\'")}')">
       <img src="${imgs[k]}" alt="${k}">
       <div class="img-ins">삽입</div>
       <div class="img-name">${k}</div>
@@ -152,28 +167,28 @@ function loadFile(input) {
   const r = new FileReader();
   r.onload = e => {
     try {
-      if (f.name.endsWith('.csv')) {
+      if (f.name.toLowerCase().endsWith('.csv')) {
         parseCSV(e.target.result);
       } else {
         const wb = XLSX.read(e.target.result, { type: 'binary' });
         const ws = wb.Sheets[wb.SheetNames[0]];
         const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
         cols = data[0] ? data[0].map(String) : [];
-        rows = data.slice(1).filter(r => r.some(c => c !== undefined && c !== ''));
+        rows = data.slice(1).filter(row => row.some(c => c !== undefined && c !== ''));
       }
       showCols();
       updateEmailSel();
       updateMapping();
     } catch (err) {
-      document.getElementById('file-name').textContent = '오류: 파일을 읽을 수 없습니다';
+      document.getElementById('file-name').textContent = '오류: 파일을 읽을 수 없습니다 — ' + err.message;
     }
   };
-  f.name.endsWith('.csv') ? r.readAsText(f, 'UTF-8') : r.readAsBinaryString(f);
+  f.name.toLowerCase().endsWith('.csv') ? r.readAsText(f, 'UTF-8') : r.readAsBinaryString(f);
 }
 
 function parseCSV(txt) {
-  const lines = txt.trim().split('\n');
-  cols = lines[0].split(',').map(c => c.replace(/"/g, '').trim());
+  const lines = txt.trim().split(/\r?\n/);
+  cols = lines[0].split(',').map(c => c.replace(/^"|"$/g, '').trim());
   rows = lines.slice(1).map(line => {
     const cells = [];
     let cur2 = '', inQ = false;
@@ -184,30 +199,25 @@ function parseCSV(txt) {
     }
     cells.push(cur2.trim());
     return cells;
-  });
+  }).filter(r => r.some(c => c !== ''));
 }
 
-/* 숫자 인덱스 → 엑셀 열 문자 (0→A, 25→Z, 26→AA ...) */
+/* ── 열 문자 변환 (0→A, 25→Z, 26→AA ...) ── */
 function colLetter(i) {
-  let s = '';
-  i += 1;
-  while (i > 0) {
-    const r = (i - 1) % 26;
+  let s = '', n = i + 1;
+  while (n > 0) {
+    const r = (n - 1) % 26;
     s = String.fromCharCode(65 + r) + s;
-    i = Math.floor((i - 1) / 26);
+    n = Math.floor((n - 1) / 26);
   }
   return s;
 }
 
 function showCols() {
-  const area = document.getElementById('col-area');
-  area.classList.remove('hidden');
+  document.getElementById('col-area').classList.remove('hidden');
   document.getElementById('col-tags').innerHTML =
-    cols.map((c, i) => `<span class="tag tag-static col-chip">
-      <span class="col-letter">${colLetter(i)}</span>${c}
-    </span>`).join('');
-  document.getElementById('data-stat').textContent =
-    `${cols.length}개 열 · ${rows.length}개 행 로드됨`;
+    cols.map((c, i) => `<span class="tag tag-static col-chip"><span class="col-letter">${colLetter(i)}</span>${c}</span>`).join('');
+  document.getElementById('data-stat').textContent = `${cols.length}개 열 · ${rows.length}개 행 로드됨`;
 }
 
 function updateEmailSel() {
@@ -216,6 +226,7 @@ function updateEmailSel() {
     cols.map((c, i) => `<option value="${i}">${colLetter(i)}열 — ${c}</option>`).join('');
 }
 
+/* ── Mapping ── */
 function updateMapping() {
   const vars = getVars();
   const area = document.getElementById('mapping-area');
@@ -224,7 +235,6 @@ function updateMapping() {
     return;
   }
   area.innerHTML = vars.map(v => {
-    // 열 문자 or 헤더명 자동 매칭
     const ai = cols.findIndex(c => c.trim().toLowerCase() === v.trim().toLowerCase());
     const opts = cols.map((c, i) =>
       `<option value="${i}"${i === ai ? ' selected' : ''}>${colLetter(i)}열 — ${c}</option>`
@@ -233,52 +243,74 @@ function updateMapping() {
       <span class="m-tag">{{${v}}}</span>
       <span class="m-arrow">→</span>
       <select class="m-sel" data-var="${v}">
-        <option value="">— 선택 —</option>
+        <option value="">— 선택 안 함 —</option>
         ${opts}
       </select>
     </div>`;
   }).join('');
 }
 
-/* ── Template rendering ── */
-function applyTmpl(tmpl, vm, rowData) {
-  return tmpl.replace(/\{\{([^}]+)\}\}/g, (match, k) => {
+/* ── Template apply: HTML 내부의 {{변수}} 치환 ── */
+function applyTmpl(tmpl, vm) {
+  // HTML 엔티티로 인코딩된 {{}} 도 처리
+  const decoded = tmpl.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+  return decoded.replace(/\{\{([^}]+)\}\}/g, (match, k) => {
     k = k.trim();
     const ci = vm[k];
     if (ci !== undefined && ci !== '') {
-      const val = rowData[parseInt(ci)];
-      return val !== undefined ? String(val) : match;
+      const val = currentRow[parseInt(ci)];
+      return val !== undefined ? escapeHTML(String(val)) : match;
     }
     return match;
   });
 }
 
+function escapeHTML(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// applyTmpl 호출 시 현재 행 데이터를 임시로 저장하는 변수
+let currentRow = [];
+
 /* ── Generate previews ── */
 function genPreviews() {
   const subj = document.getElementById('subj').value;
   const bodyHTML = editor.innerHTML;
-  const emailColIdx = parseInt(document.getElementById('email-col').value);
+  const emailColVal = document.getElementById('email-col').value;
+  const emailColIdx = emailColVal !== '' ? parseInt(emailColVal) : -1;
   const rs = parseInt(document.getElementById('row-s').value) - 2;
   const re = parseInt(document.getElementById('row-e').value);
 
+  // 변수 → 열 인덱스 맵
   const vm = {};
-  document.querySelectorAll('[data-var]').forEach(s => { vm[s.dataset.var] = s.value; });
+  document.querySelectorAll('[data-var]').forEach(s => {
+    if (s.value !== '') vm[s.dataset.var] = s.value;
+  });
 
+  // 행 범위 슬라이싱
   let wr = rows.slice(Math.max(0, rs));
-  if (re > 0) wr = wr.slice(0, re - Math.max(1, parseInt(document.getElementById('row-s').value)) + 1);
+  if (re > 0) {
+    const startRow = parseInt(document.getElementById('row-s').value);
+    wr = wr.slice(0, re - startRow + 1);
+  }
 
-  if (!wr.length) { showMapStatus('데이터 행이 없습니다. 파일과 행 범위를 확인하세요.', 'warn'); return; }
+  if (!wr.length) {
+    showMapStatus('데이터 행이 없습니다. 파일과 행 범위를 확인하세요.', 'warn');
+    return;
+  }
 
   previews = wr.map((row, i) => {
+    currentRow = row;
     const email = emailColIdx >= 0 ? String(row[emailColIdx] || '') : '';
     return {
       i: i + 1,
       to: email,
-      subj: applyTmpl(subj, vm, row),
-      body: applyTmpl(bodyHTML, vm, row),
-      valid: email.includes('@')
+      subj: applyTmpl(subj, vm),
+      body: applyTmpl(bodyHTML, vm),
+      valid: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
     };
   });
+  currentRow = [];
 
   cur = 0;
   renderPrev();
@@ -307,14 +339,8 @@ function renderPrev() {
   document.getElementById('prev-area').innerHTML = `
     <div class="email-frame">
       <div class="email-meta">
-        <div class="email-meta-row">
-          <span class="meta-label">받는 이</span>
-          <span class="meta-val">${p.to || '(없음)'}</span>
-        </div>
-        <div class="email-meta-row">
-          <span class="meta-label">제목</span>
-          <span class="meta-val">${p.subj || '(없음)'}</span>
-        </div>
+        <div class="email-meta-row"><span class="meta-label">받는 이</span><span class="meta-val">${p.to || '(없음)'}</span></div>
+        <div class="email-meta-row"><span class="meta-label">제목</span><span class="meta-val">${p.subj || '(없음)'}</span></div>
       </div>
       <div class="email-body-preview">${p.body}</div>
     </div>`;
@@ -331,7 +357,7 @@ function sendGmail() {
   if (!previews.length) return;
   const p = previews[cur];
   if (!p.valid) { showMapStatus('현재 항목의 이메일 주소가 없습니다.', 'warn'); return; }
-  const plain = p.body.replace(/<[^>]+>/g, '');
+  const plain = p.body.replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>/gi, '\n').replace(/<[^>]+>/g, '');
   const url = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(p.to)}&su=${encodeURIComponent(p.subj)}&body=${encodeURIComponent(plain)}`;
   window.open(url, '_blank');
 }
@@ -346,8 +372,8 @@ function exportHTML() {
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>${p.subj}</title>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 620px; margin: 40px auto; font-size: 14px; line-height: 1.75; color: #1a1a18; }
-    .meta { color: #888; font-size: 12px; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #eee; }
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:620px;margin:40px auto;font-size:14px;line-height:1.75;color:#1a1a18}
+    .meta{color:#888;font-size:12px;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid #eee}
   </style>
 </head>
 <body>
