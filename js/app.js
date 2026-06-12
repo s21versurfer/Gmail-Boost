@@ -1,6 +1,17 @@
 /* ── State ── */
 let cols = [], rows = [], previews = [], cur = 0, imgs = {};
 let savedRange = null;
+let editor = null;  // DOM 준비 후 바인딩
+
+/* ── DOMContentLoaded ── */
+document.addEventListener('DOMContentLoaded', () => {
+  editor = document.getElementById('body-editor');
+  editor.addEventListener('blur', saveRange);
+  editor.addEventListener('keyup', () => { updateTags(); saveRange(); });
+  editor.addEventListener('mouseup', saveRange);
+  editor.addEventListener('input', updateTags);
+  updateTags();
+});
 
 /* ── Tab switching ── */
 function sw(name) {
@@ -20,8 +31,8 @@ function saveRange() {
   if (sel && sel.rangeCount) savedRange = sel.getRangeAt(0).cloneRange();
 }
 function restoreRange() {
-  const ed = document.getElementById('body-editor');
-  ed.focus();
+  if (!editor) return;
+  editor.focus();
   if (savedRange) {
     const sel = window.getSelection();
     sel.removeAllRanges();
@@ -29,26 +40,11 @@ function restoreRange() {
   }
 }
 
-const editor = document.getElementById('body-editor');
-editor.addEventListener('blur', saveRange);
-editor.addEventListener('keyup', () => { updateTags(); saveRange(); });
-editor.addEventListener('mouseup', saveRange);
-editor.addEventListener('input', updateTags);
-
-/* ── 에디터 텍스트 추출 (HTML 태그 제거, 엔티티 디코딩) ── */
-function editorPlainText() {
-  // innerHTML에서 <br>→\n 변환 후 태그 제거
-  return editor.innerHTML
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/p>/gi, '\n')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ');
-}
-
 /* ── Toolbar commands ── */
-function fmt(cmd) { editor.focus(); document.execCommand(cmd, false, null); updateTags(); }
+function fmt(cmd) { if (!editor) return; editor.focus(); document.execCommand(cmd, false, null); updateTags(); }
 
 function setFontSize(v) {
+  if (!editor) return;
   editor.focus();
   document.execCommand('fontSize', false, '7');
   document.querySelectorAll('#body-editor font[size="7"]').forEach(el => {
@@ -57,16 +53,18 @@ function setFontSize(v) {
   });
 }
 
-function setColor(cmd, val) { editor.focus(); document.execCommand(cmd, false, val); }
-function clearFmt() { editor.focus(); document.execCommand('removeFormat', false, null); }
-function insertList() { editor.focus(); document.execCommand('insertUnorderedList', false, null); }
+function setColor(cmd, val) { if (!editor) return; editor.focus(); document.execCommand(cmd, false, val); }
+function clearFmt() { if (!editor) return; editor.focus(); document.execCommand('removeFormat', false, null); }
+function insertList() { if (!editor) return; editor.focus(); document.execCommand('insertUnorderedList', false, null); }
 
 function insertHR() {
+  if (!editor) return;
   editor.focus();
   document.execCommand('insertHTML', false, '<hr style="border:none;border-top:1px solid #e0e0e0;margin:12px 0">');
 }
 
 function insertTable() {
+  if (!editor) return;
   const html = `<table style="width:100%;border-collapse:collapse;font-size:13px;margin:8px 0">
   <tr>
     <th style="border:1px solid #ddd;padding:6px 10px;background:#f5f5f5;text-align:left">항목</th>
@@ -85,30 +83,29 @@ function insertTable() {
   document.execCommand('insertHTML', false, html);
 }
 
-/* ── Variable detection ── 제목 + 에디터 텍스트에서 {{변수}} 감지 */
+/* ── Variable detection ── */
 function getVars() {
   const subjTxt = document.getElementById('subj').value || '';
-  // innerHTML 전체(서식 포함)에서 {{...}} 추출 — 엔티티 디코딩 후 파싱
-  const raw = editor.innerHTML
-    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
-  const combined = subjTxt + raw;
-  const m = [...combined.matchAll(/\{\{([^}]+)\}\}/g)];
-  return [...new Set(m.map(x => x[1].trim()))];
+  // innerText로 읽으면 HTML 엔티티 변환 없이 순수 텍스트로 {{변수}} 감지 가능
+  const bodyTxt = editor ? (editor.innerText || '') : '';
+  const combined = subjTxt + bodyTxt;
+  const m = [...combined.matchAll(/\{\{([^{}]+)\}\}/g)];
+  return [...new Set(m.map(x => x[1].trim()).filter(Boolean))];
 }
 
 function updateTags() {
   const v = getVars();
   const row = document.getElementById('tag-row');
+  if (!row) return;
   row.innerHTML = v.length
-    ? v.map(x => `<button class="tag" onclick="insertVar('${CSS.escape(x)}','${x.replace(/'/g,"\\'")}')">{{${x}}}</button>`).join('')
+    ? v.map(x => `<button class="tag" onclick="insertVar('${x.replace(/'/g, "\\'")}')">\{\{${x}\}\}</button>`).join('')
     : '<span class="empty-note">변수 없음</span>';
 }
 
-/* 에디터에 {{변수}} 텍스트 그대로 삽입 (span 래퍼 없음) */
-function insertVar(escaped, raw) {
+/* 에디터에 {{변수}} 순수 텍스트로 삽입 */
+function insertVar(varName) {
   restoreRange();
-  // 순수 텍스트로 삽입 — 하이라이트는 CSS ::after 트릭 대신 그냥 텍스트로
-  document.execCommand('insertText', false, `{{${raw}}}`);
+  document.execCommand('insertText', false, '{{' + varName + '}}');
   saveRange();
   updateTags();
 }
@@ -127,7 +124,7 @@ function renderImgGrid() {
   const keys = Object.keys(imgs);
   if (!keys.length) { g.innerHTML = '<p class="empty-note">이미지 없음</p>'; return; }
   g.innerHTML = keys.map(k => `
-    <div class="img-thumb" onclick="insertImg('${k.replace(/'/g,"\\'")}')">
+    <div class="img-thumb" onclick="insertImg('${k.replace(/'/g, "\\'")}')">
       <img src="${imgs[k]}" alt="${k}">
       <div class="img-ins">삽입</div>
       <div class="img-name">${k}</div>
@@ -180,7 +177,7 @@ function loadFile(input) {
       updateEmailSel();
       updateMapping();
     } catch (err) {
-      document.getElementById('file-name').textContent = '오류: 파일을 읽을 수 없습니다 — ' + err.message;
+      document.getElementById('file-name').textContent = '오류: ' + err.message;
     }
   };
   f.name.toLowerCase().endsWith('.csv') ? r.readAsText(f, 'UTF-8') : r.readAsBinaryString(f);
@@ -230,11 +227,23 @@ function updateEmailSel() {
 function updateMapping() {
   const vars = getVars();
   const area = document.getElementById('mapping-area');
-  if (!vars.length || !cols.length) {
+  if (!area) return;
+
+  if (!vars.length && !cols.length) {
     area.innerHTML = '<p class="empty-note">템플릿과 데이터를 먼저 입력하세요</p>';
     return;
   }
+  if (!vars.length) {
+    area.innerHTML = '<p class="empty-note">템플릿에 {{변수}}가 없습니다</p>';
+    return;
+  }
+  if (!cols.length) {
+    area.innerHTML = '<p class="empty-note">데이터 파일을 먼저 업로드하세요</p>';
+    return;
+  }
+
   area.innerHTML = vars.map(v => {
+    // 변수명과 헤더명이 같으면 자동 매칭
     const ai = cols.findIndex(c => c.trim().toLowerCase() === v.trim().toLowerCase());
     const opts = cols.map((c, i) =>
       `<option value="${i}"${i === ai ? ' selected' : ''}>${colLetter(i)}열 — ${c}</option>`
@@ -250,54 +259,46 @@ function updateMapping() {
   }).join('');
 }
 
-/* ── Template apply: HTML 내부의 {{변수}} 치환 ── */
+/* ── Template apply ── */
+let currentRow = [];
+
 function applyTmpl(tmpl, vm) {
-  // HTML 엔티티로 인코딩된 {{}} 도 처리
-  const decoded = tmpl.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
-  return decoded.replace(/\{\{([^}]+)\}\}/g, (match, k) => {
+  // innerHTML 기준이므로 innerText {{변수}} 가 텍스트노드로 그대로 존재함
+  // 단, HTML 엔티티로 인코딩된 경우도 처리
+  const decoded = tmpl
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+  return decoded.replace(/\{\{([^{}]+)\}\}/g, (match, k) => {
     k = k.trim();
     const ci = vm[k];
     if (ci !== undefined && ci !== '') {
       const val = currentRow[parseInt(ci)];
-      return val !== undefined ? escapeHTML(String(val)) : match;
+      return val !== undefined ? String(val) : match;
     }
     return match;
   });
 }
 
-function escapeHTML(s) {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
-
-// applyTmpl 호출 시 현재 행 데이터를 임시로 저장하는 변수
-let currentRow = [];
-
 /* ── Generate previews ── */
 function genPreviews() {
-  const subj = document.getElementById('subj').value;
-  const bodyHTML = editor.innerHTML;
+  const subj = document.getElementById('subj').value || '';
+  const bodyHTML = editor ? editor.innerHTML : '';
   const emailColVal = document.getElementById('email-col').value;
   const emailColIdx = emailColVal !== '' ? parseInt(emailColVal) : -1;
   const rs = parseInt(document.getElementById('row-s').value) - 2;
   const re = parseInt(document.getElementById('row-e').value);
 
-  // 변수 → 열 인덱스 맵
   const vm = {};
   document.querySelectorAll('[data-var]').forEach(s => {
     if (s.value !== '') vm[s.dataset.var] = s.value;
   });
 
-  // 행 범위 슬라이싱
   let wr = rows.slice(Math.max(0, rs));
   if (re > 0) {
     const startRow = parseInt(document.getElementById('row-s').value);
     wr = wr.slice(0, re - startRow + 1);
   }
 
-  if (!wr.length) {
-    showMapStatus('데이터 행이 없습니다. 파일과 행 범위를 확인하세요.', 'warn');
-    return;
-  }
+  if (!wr.length) { showMapStatus('데이터 행이 없습니다. 파일과 행 범위를 확인하세요.', 'warn'); return; }
 
   previews = wr.map((row, i) => {
     currentRow = row;
@@ -329,13 +330,11 @@ function showMapStatus(msg, type) {
 function renderPrev() {
   if (!previews.length) return;
   const p = previews[cur];
-
   document.getElementById('prev-count').textContent = `${cur + 1} / ${previews.length}`;
   const badge = document.getElementById('cur-badge');
   badge.style.display = 'inline-block';
   badge.className = 'badge ' + (p.valid ? 'badge-ok' : 'badge-warn');
   badge.textContent = p.valid ? '유효' : '주소 없음';
-
   document.getElementById('prev-area').innerHTML = `
     <div class="email-frame">
       <div class="email-meta">
@@ -389,6 +388,3 @@ function exportHTML() {
   a.click();
   URL.revokeObjectURL(url);
 }
-
-/* ── Init ── */
-updateTags();
