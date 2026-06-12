@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>이메일 머지 — HTML 메일 작성기</title>
+  <link rel="stylesheet" href="css/style.css">
+  <!-- Tabler Icons -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.5.0/tabler-icons.min.css">
+  <!-- SheetJS (Excel/CSV 파싱) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+
+<header class="app-header">
+  <div class="header-inner">
+    <div class="header-logo">
+      <i class="ti ti-mail-forward"></i>
+      <span>이메일 머지</span>
+    </div>
+    <span class="header-sub">HTML 서식 · 이미지 · 스프레드시트 → Gmail</span>
+  </div>
+</header>
+
+<main class="app-wrap">
+  <div class="app-grid">
+
+    <!-- ── 왼쪽 패널 ── -->
+    <div class="panel panel-left">
+      <nav class="nav-tabs" role="tablist">
+        <button class="tab active" onclick="sw('tpl')" role="tab">템플릿</button>
+        <button class="tab" onclick="sw('img')" role="tab">이미지</button>
+        <button class="tab" onclick="sw('data')" role="tab">데이터</button>
+        <button class="tab" onclick="sw('map')" role="tab">매핑</button>
+      </nav>
+
+      <!-- 탭: 템플릿 -->
+      <div class="tab-content" id="t-tpl">
+        <div class="section">
+          <label class="field-label" for="subj">제목</label>
+          <input type="text" id="subj" placeholder="{{이름}}님께 보내는 안내 메일">
+        </div>
+        <div class="section">
+          <label class="field-label">본문
+            <small>— {{변수}}를 클릭해 삽입</small>
+          </label>
+          <div class="toolbar" id="toolbar">
+            <div class="tb-group">
+              <button class="tb-btn" onclick="fmt('bold')" title="굵게"><i class="ti ti-bold"></i></button>
+              <button class="tb-btn" onclick="fmt('italic')" title="기울임"><i class="ti ti-italic"></i></button>
+              <button class="tb-btn" onclick="fmt('underline')" title="밑줄"><i class="ti ti-underline"></i></button>
+            </div>
+            <span class="tb-sep"></span>
+            <select id="font-size" title="글자 크기" onchange="setFontSize(this.value)">
+              <option>12px</option><option selected>14px</option><option>16px</option>
+              <option>18px</option><option>22px</option><option>28px</option>
+            </select>
+            <span class="tb-sep"></span>
+            <div class="tb-group">
+              <button class="tb-btn" onclick="fmt('justifyLeft')" title="왼쪽 정렬"><i class="ti ti-align-left"></i></button>
+              <button class="tb-btn" onclick="fmt('justifyCenter')" title="가운데 정렬"><i class="ti ti-align-center"></i></button>
+              <button class="tb-btn" onclick="fmt('justifyRight')" title="오른쪽 정렬"><i class="ti ti-align-right"></i></button>
+            </div>
+            <span class="tb-sep"></span>
+            <div class="tb-group">
+              <button class="tb-btn" onclick="insertList()" title="목록"><i class="ti ti-list"></i></button>
+              <button class="tb-btn" onclick="insertHR()" title="구분선"><i class="ti ti-minus"></i></button>
+              <button class="tb-btn" onclick="insertTable()" title="표 삽입"><i class="ti ti-table"></i></button>
+            </div>
+            <span class="tb-sep"></span>
+            <div class="tb-group color-group">
+              <label class="color-label">글자색
+                <input type="color" id="fc" value="#534AB7" onchange="setColor('foreColor',this.value)" title="글자색">
+              </label>
+              <label class="color-label">배경
+                <input type="color" id="bc" value="#EEEDFE" onchange="setColor('hiliteColor',this.value)" title="배경색">
+              </label>
+            </div>
+            <span class="tb-sep"></span>
+            <button class="tb-btn" onclick="clearFmt()" title="서식 지우기"><i class="ti ti-clear-formatting"></i></button>
+          </div>
+          <div class="editor-wrap">
+            <div id="body-editor" contenteditable="true" spellcheck="false">안녕하세요 <b>{{이름}}</b>님,<br><br>{{내용}}<br><br>감사합니다.</div>
+          </div>
+        </div>
+        <div class="section">
+          <label class="field-label">감지된 변수
+            <small>— 클릭하면 커서 위치에 삽입</small>
+          </label>
+          <div class="tag-row" id="tag-row"></div>
+        </div>
+      </div>
+
+      <!-- 탭: 이미지 -->
+      <div class="tab-content hidden" id="t-img">
+        <div class="section">
+          <label class="field-label">이미지 업로드</label>
+          <div class="upload-zone" onclick="document.getElementById('img-input').click()" role="button" tabindex="0">
+            <i class="ti ti-photo-plus"></i>
+            <span>클릭하거나 이미지를 드래그하세요</span>
+            <small>JPG, PNG, GIF, WebP</small>
+          </div>
+          <input type="file" id="img-input" accept="image/*" multiple style="display:none" onchange="loadImages(this)">
+        </div>
+        <div class="section">
+          <label class="field-label">업로드된 이미지 <small>— 클릭하면 본문에 삽입</small></label>
+          <div class="img-grid" id="img-grid">
+            <p class="empty-note">이미지 없음</p>
+          </div>
+        </div>
+        <div class="section">
+          <label class="field-label" for="img-url">이미지 URL 직접 입력</label>
+          <div class="input-row">
+            <input type="text" id="img-url" placeholder="https://example.com/image.png">
+            <button class="btn" onclick="insertImgUrl()"><i class="ti ti-plus"></i> 삽입</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 탭: 데이터 -->
+      <div class="tab-content hidden" id="t-data">
+        <div class="section">
+          <label class="field-label">파일 업로드</label>
+          <div class="upload-zone" onclick="document.getElementById('file-input').click()" role="button" tabindex="0">
+            <i class="ti ti-table-import"></i>
+            <span>Excel (.xlsx) 또는 CSV</span>
+          </div>
+          <input type="file" id="file-input" accept=".xlsx,.xls,.csv" style="display:none" onchange="loadFile(this)">
+          <p id="file-name" class="file-note"></p>
+        </div>
+        <div class="row2 section">
+          <div>
+            <label class="field-label" for="row-s">시작 행</label>
+            <input type="number" id="row-s" value="2" min="1">
+          </div>
+          <div>
+            <label class="field-label" for="row-e">끝 행 <small>(0=끝까지)</small></label>
+            <input type="number" id="row-e" value="0" min="0">
+          </div>
+        </div>
+        <div id="col-area" class="hidden section">
+          <label class="field-label">열 목록</label>
+          <div class="tag-row" id="col-tags"></div>
+          <p id="data-stat" class="status s-ok"></p>
+        </div>
+      </div>
+
+      <!-- 탭: 매핑 -->
+      <div class="tab-content hidden" id="t-map">
+        <div class="section">
+          <label class="field-label" for="email-col">수신자 이메일 열</label>
+          <select id="email-col"><option>— 선택 —</option></select>
+        </div>
+        <div class="section">
+          <label class="field-label">변수 → 열 매핑</label>
+          <div id="mapping-area" class="mapping-area">
+            <p class="empty-note">템플릿과 데이터를 먼저 입력하세요</p>
+          </div>
+        </div>
+        <button class="btn btn-primary full-width" onclick="genPreviews()">
+          <i class="ti ti-eye"></i> 미리보기 생성
+        </button>
+        <div id="map-status"></div>
+      </div>
+    </div>
+
+    <!-- ── 오른쪽 패널 ── -->
+    <div class="panel panel-right">
+      <div class="prev-header">
+        <div class="prev-title">
+          <i class="ti ti-device-desktop"></i>
+          <span>미리보기</span>
+          <span id="cur-badge" class="badge badge-ok" style="display:none"></span>
+        </div>
+        <div class="prev-nav">
+          <button class="nav-btn" onclick="nav(-1)" aria-label="이전"><i class="ti ti-chevron-left"></i></button>
+          <span class="prev-count" id="prev-count">—</span>
+          <button class="nav-btn" onclick="nav(1)" aria-label="다음"><i class="ti ti-chevron-right"></i></button>
+        </div>
+      </div>
+
+      <div class="prev-area" id="prev-area">
+        <div class="empty-state">
+          <i class="ti ti-inbox"></i>
+          <span>매핑 탭에서 미리보기를 생성하세요</span>
+        </div>
+      </div>
+
+      <div class="send-bar" id="send-bar" style="display:none">
+        <span class="send-info" id="send-info"></span>
+        <div class="send-actions">
+          <button class="btn" onclick="exportHTML()"><i class="ti ti-download"></i> HTML 저장</button>
+          <button class="btn btn-primary" onclick="sendGmail()"><i class="ti ti-brand-gmail"></i> Gmail 열기</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<script src="js/app.js"></script>
+</body>
+</html>
